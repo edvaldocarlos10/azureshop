@@ -8,6 +8,21 @@ variable "virtual_network_subnet_id" {
   type        = string
   default     = ""
 }
+variable "db_provider" {
+  type        = string
+  default     = "sqlite"
+  description = "Provedor de banco: sqlite ou sqlserver."
+}
+variable "azure_sql_server" {
+  type        = string
+  default     = ""
+  description = "Nome do servidor Azure SQL."
+}
+variable "azure_sql_database" {
+  type        = string
+  default     = ""
+  description = "Nome do banco Azure SQL."
+}
 
 resource "azurerm_service_plan" "this" {
   name                = "plan-imersao"
@@ -31,6 +46,17 @@ resource "azurerm_linux_web_app" "this" {
     type = "SystemAssigned"
   }
 
+  lifecycle {
+    precondition {
+      condition     = contains(["sqlite", "sqlserver"], var.db_provider)
+      error_message = "db_provider deve ser sqlite ou sqlserver."
+    }
+    precondition {
+      condition     = var.db_provider != "sqlserver" || (var.azure_sql_server != "" && var.azure_sql_database != "")
+      error_message = "Informe azure_sql_server e azure_sql_database ao usar sqlserver."
+    }
+  }
+
   site_config {
     minimum_tls_version               = "1.2"
     ftps_state                        = "Disabled"
@@ -43,14 +69,23 @@ resource "azurerm_linux_web_app" "this" {
     }
   }
 
-  app_settings = {
-    APP_ENV                             = "azure"
-    DB_PROVIDER                         = "sqlite"
-    SQLITE_PATH                         = "/home/data/loja.db"
-    WEBSITE_RUN_FROM_PACKAGE            = "0"
-    SCM_DO_BUILD_DURING_DEPLOYMENT      = "false"
-    WEBSITES_ENABLE_APP_SERVICE_STORAGE = "true"
-  }
+  app_settings = merge(
+    {
+      APP_ENV                             = "azure"
+      DB_PROVIDER                         = var.db_provider
+      WEBSITE_RUN_FROM_PACKAGE            = "0"
+      SCM_DO_BUILD_DURING_DEPLOYMENT      = "false"
+      WEBSITES_ENABLE_APP_SERVICE_STORAGE = "true"
+    },
+    var.db_provider == "sqlite" ? {
+      SQLITE_PATH = "/home/data/loja.db"
+    } : {},
+    var.db_provider == "sqlserver" ? {
+      AZURE_SQL_SERVER   = var.azure_sql_server
+      AZURE_SQL_DATABASE = var.azure_sql_database
+      AZURE_SQL_AUTH     = "managedIdentity"
+    } : {}
+  )
 }
 
 output "name" { value = azurerm_linux_web_app.this.name }
